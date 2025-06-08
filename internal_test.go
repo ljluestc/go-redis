@@ -20,7 +20,7 @@ var _ = Describe("newClusterState", func() {
 	var state *clusterState
 
 	createClusterState := func(slots []ClusterSlot) *clusterState {
-		opt := &ClusterOptions{}
+		opt := &OSSClusterOptions{}
 		opt.init()
 		nodes := newClusterNodes(opt)
 		state, err := newClusterState(nodes, slots, "10.10.10.10:1234")

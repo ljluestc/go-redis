@@ -126,7 +126,125 @@ var _ = Describe("MinIdleConns", func() {
 	ctx := context.Background()
 	var minIdleConns int
 	var connPool *pool.ConnPool
+package pool_test
 
+import (
+	"context"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/internal/pool"
+)
+
+func TestCustomHealthCheck(t *testing.T) {
+	// Start a mock Redis server
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	// Accept connections in a separate goroutine
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			// Handle the connection in a separate goroutine
+			go handleConnection(conn)
+		}
+	}()
+
+	// Create a map to track which addresses we consider "draining"
+	drainingNodes := &sync.Map{}
+	drainingNodes.Store(listener.Addr().String(), false)
+
+	// Create Redis client with custom health check
+	opt := &redis.Options{
+		Addr: listener.Addr().String(),
+		HealthCheckHook: func(ctx context.Context, cn *redis.Conn) bool {
+			// Check if this node is marked as draining
+			draining, _ := drainingNodes.Load(cn.NetConn().RemoteAddr().String())
+			return !draining.(bool)
+		},
+		DialTimeout: time.Second,
+		PoolSize:    10,
+	}
+
+	client := redis.NewClient(opt)
+	defer client.Close()
+
+	// Test 1: Connection should be healthy (not draining)
+	ctx := context.Background()
+	_, err = client.Ping(ctx).Result()
+	if err != nil {
+		t.Fatalf("Ping failed when node is healthy: %v", err)
+	}
+
+	// Test 2: Mark node as draining, connections should be considered unhealthy
+	drainingNodes.Store(listener.Addr().String(), true)
+
+	// Give some time for the change to propagate
+	time.Sleep(2 * time.Second)
+
+	// Try multiple times as connection pool might have existing connections
+	for i := 0; i < 5; i++ {
+		_, err = client.Ping(ctx).Result()
+		if err != nil {
+			// Expected to fail since node is draining
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err == nil {
+		t.Fatalf("Expected Ping to fail when node is draining")
+	}
+
+	// Test 3: Mark node as not draining again, connections should recover
+	drainingNodes.Store(listener.Addr().String(), false)
+
+	// Give some time for the pool to recover
+	time.Sleep(2 * time.Second)
+
+	// Try multiple times as it might take a moment to establish new connections
+	var pingSuccess bool
+	for i := 0; i < 5; i++ {
+		_, err = client.Ping(ctx).Result()
+		if err == nil {
+			pingSuccess = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !pingSuccess {
+		t.Fatalf("Ping failed after node stopped draining: %v", err)
+	}
+}
+
+// Simple mock Redis server that responds to PING
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	buf := make([]byte, 1024)
+	for {
+		// Set a read deadline to prevent hanging
+		conn.SetReadDeadline(time.Now().Add(time.Second))
+		
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+		
+		// Check if the command is PING
+		if string(buf[:n]) == "*1\r\n$4\r\nPING\r\n" {
+			conn.Write([]byte("+PONG\r\n"))
+		}
+	}
+}
 	newConnPool := func() *pool.ConnPool {
 		connPool := pool.NewConnPool(&pool.Options{
 			Dialer:          dummyDialer,

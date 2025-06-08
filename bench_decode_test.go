@@ -40,7 +40,7 @@ func NewClusterClientStub(resp []byte) *ClientStub {
 		resp: resp,
 	}
 
-	client := NewClusterClient(&ClusterOptions{
+	client := NewClusterClient(&OSSClusterOptions{
 		PoolSize: 128,
 		Addrs:    []string{":6379"},
 		Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {

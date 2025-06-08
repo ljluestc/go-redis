@@ -1,6 +1,8 @@
 module github.com/redis/go-redis/extra/redisotel/v9
 
-go 1.19
+go 1.24
+
+toolchain go1.24.3
 
 replace github.com/redis/go-redis/v9 => ../..
 
