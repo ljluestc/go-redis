@@ -28,9 +28,9 @@ const (
 
 var errClusterNoNodes = fmt.Errorf("redis: cluster has no nodes")
 
-// ClusterOptions are used to configure a cluster client and should be
+// OSSClusterOptions are used to configure a cluster client and should be
 // passed to NewClusterClient.
-type ClusterOptions struct {
+type OSSClusterOptions struct {
 	// A seed list of host:port addresses of cluster nodes.
 	Addrs []string
 
@@ -112,7 +112,7 @@ type ClusterOptions struct {
 	UnstableResp3 bool
 }
 
-func (opt *ClusterOptions) init() {
+func (opt *OSSClusterOptions) init() {
 	switch opt.MaxRedirects {
 	case -1:
 		opt.MaxRedirects = 0
@@ -197,8 +197,8 @@ func (opt *ClusterOptions) init() {
 //		DialTimeout: 3 * time.Second, // no time unit = seconds
 //		ReadTimeout: 6 * time.Second,
 //	}
-func ParseClusterURL(redisURL string) (*ClusterOptions, error) {
-	o := &ClusterOptions{}
+func ParseClusterURL(redisURL string) (*OSSClusterOptions, error) {
+	o := &OSSClusterOptions{}
 
 	u, err := url.Parse(redisURL)
 	if err != nil {
@@ -220,7 +220,7 @@ func ParseClusterURL(redisURL string) (*ClusterOptions, error) {
 }
 
 // setupClusterConn gets the username and password from the URL and the query parameters.
-func setupClusterConn(u *url.URL, host string, o *ClusterOptions) (*ClusterOptions, error) {
+func setupClusterConn(u *url.URL, host string, o *OSSClusterOptions) (*OSSClusterOptions, error) {
 	switch u.Scheme {
 	case "rediss":
 		o.TLSConfig = &tls.Config{ServerName: host}
@@ -241,7 +241,7 @@ func setupClusterConn(u *url.URL, host string, o *ClusterOptions) (*ClusterOptio
 }
 
 // setupClusterQueryParams converts query parameters in u to option value in o.
-func setupClusterQueryParams(u *url.URL, o *ClusterOptions) (*ClusterOptions, error) {
+func setupClusterQueryParams(u *url.URL, o *OSSClusterOptions) (*OSSClusterOptions, error) {
 	q := queryOptions{q: u.Query()}
 
 	o.Protocol = q.int("protocol")
@@ -288,7 +288,7 @@ func setupClusterQueryParams(u *url.URL, o *ClusterOptions) (*ClusterOptions, er
 	return o, nil
 }
 
-func (opt *ClusterOptions) clientOptions() *Options {
+func (opt *OSSClusterOptions) clientOptions() *Options {
 	return &Options{
 		ClientName: opt.ClientName,
 		Dialer:     opt.Dialer,
@@ -346,7 +346,7 @@ type clusterNode struct {
 	lastLatencyMeasurement int64 // atomic
 }
 
-func newClusterNode(clOpt *ClusterOptions, addr string) *clusterNode {
+func newClusterNode(clOpt *OSSClusterOptions, addr string) *clusterNode {
 	opt := clOpt.clientOptions()
 	opt.Addr = addr
 	node := clusterNode{
@@ -459,7 +459,7 @@ func (n *clusterNode) Loading() bool {
 //------------------------------------------------------------------------------
 
 type clusterNodes struct {
-	opt *ClusterOptions
+	opt *OSSClusterOptions
 
 	mu          sync.RWMutex
 	addrs       []string
@@ -471,7 +471,7 @@ type clusterNodes struct {
 	_generation uint32 // atomic
 }
 
-func newClusterNodes(opt *ClusterOptions) *clusterNodes {
+func newClusterNodes(opt *OSSClusterOptions) *clusterNodes {
 	return &clusterNodes{
 		opt: opt,
 
@@ -925,7 +925,7 @@ func (c *clusterStateHolder) ReloadOrGet(ctx context.Context) (*clusterState, er
 // or more underlying connections. It's safe for concurrent use by
 // multiple goroutines.
 type ClusterClient struct {
-	opt           *ClusterOptions
+	opt           *OSSClusterOptions
 	nodes         *clusterNodes
 	state         *clusterStateHolder
 	cmdsInfoCache *cmdsInfoCache
@@ -935,7 +935,7 @@ type ClusterClient struct {
 
 // NewClusterClient returns a Redis Cluster client as described in
 // http://redis.io/topics/cluster-spec.
-func NewClusterClient(opt *ClusterOptions) *ClusterClient {
+func NewClusterClient(opt *OSSClusterOptions) *ClusterClient {
 	if opt == nil {
 		panic("redis: NewClusterClient nil options")
 	}
@@ -961,7 +961,7 @@ func NewClusterClient(opt *ClusterOptions) *ClusterClient {
 }
 
 // Options returns read-only Options that were used to create the client.
-func (c *ClusterClient) Options() *ClusterOptions {
+func (c *ClusterClient) Options() *OSSClusterOptions {
 	return c.opt
 }
 

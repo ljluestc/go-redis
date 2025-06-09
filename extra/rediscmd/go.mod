@@ -1,13 +1,15 @@
 module github.com/redis/go-redis/extra/rediscmd/v9
 
-go 1.19
+go 1.24
+
+toolchain go1.24.3
 
 replace github.com/redis/go-redis/v9 => ../..
 
 require (
 	github.com/bsm/ginkgo/v2 v2.12.0
 	github.com/bsm/gomega v1.27.10
-	github.com/redis/go-redis/v9 v9.9.0
+	github.com/redis/go-redis/v9 v9.10.0
 )
 
 require (

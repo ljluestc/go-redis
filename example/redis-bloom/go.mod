@@ -1,10 +1,12 @@
 module github.com/redis/go-redis/example/redis-bloom
 
-go 1.18
+go 1.24
+
+toolchain go1.24.3
 
 replace github.com/redis/go-redis/v9 => ../..
 
-require github.com/redis/go-redis/v9 v9.9.0
+require github.com/redis/go-redis/v9 v9.10.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

@@ -106,3 +106,8 @@ func (c *ModuleLoadexConfig) ToArgs() []interface{} {
 func ShouldRetry(err error, retryTimeout bool) bool {
 	return shouldRetry(err, retryTimeout)
 }
+
+// For testing ConsistentClusterClient
+func (cc *ConsistentClusterClient) GetSlotRange(key string) (slotRange, error) {
+	return cc.getSlotRange(key)
+}

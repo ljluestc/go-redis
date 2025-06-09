@@ -17,6 +17,11 @@ import (
 	"github.com/redis/go-redis/v9/internal/pool"
 )
 
+// HealthCheckHook is a function that checks if a connection is healthy.
+// This can be used to implement custom health checks for scenarios like
+// draining connections during node upgrades.
+type HealthCheckHook func(ctx context.Context, cn *Conn) bool
+
 // Limiter is the interface of a rate limiter or a circuit breaker.
 type Limiter interface {
 	// Allow returns nil if operation is allowed or an error otherwise.
@@ -48,6 +53,12 @@ type Options struct {
 
 	// Hook that is called when new connection is established.
 	OnConnect func(ctx context.Context, cn *Conn) error
+
+	// HealthCheckHook is called to determine if a connection is healthy.
+	// This can be used to implement custom health checks for scenarios like
+	// draining connections during node upgrades.
+	// If not set, a default PING check will be used.
+	HealthCheckHook HealthCheckHook
 
 	// Protocol 2 or 3. Use the version to negotiate RESP version with redis-server.
 	//
@@ -229,7 +240,9 @@ func (opt *Options) init() {
 			opt.Network = "tcp"
 		}
 	}
-	if opt.Protocol < 2 {
+	if opt.Protocol != 0 && opt.Protocol < 2 {
+		opt.Protocol = 3
+	} else if opt.Protocol == 0 {
 		opt.Protocol = 3
 	}
 	if opt.DialTimeout == 0 {
@@ -499,6 +512,9 @@ func (o *queryOptions) bool(name string) bool {
 		return false
 	}
 }
+
+// StreamingCredentialsProvider is an alias for auth.StreamingCredentialsProvider
+type StreamingCredentialsProvider = auth.StreamingCredentialsProvider
 
 func (o *queryOptions) remaining() []string {
 	if len(o.q) == 0 {

@@ -1,12 +1,14 @@
 module github.com/redis/go-redis/example/scan-struct
 
-go 1.18
+go 1.24
+
+toolchain go1.24.3
 
 replace github.com/redis/go-redis/v9 => ../..
 
 require (
 	github.com/davecgh/go-spew v1.1.1
-	github.com/redis/go-redis/v9 v9.9.0
+	github.com/redis/go-redis/v9 v9.10.0
 )
 
 require (

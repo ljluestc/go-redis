@@ -85,12 +85,12 @@ type UniversalOptions struct {
 }
 
 // Cluster returns cluster options created from the universal options.
-func (o *UniversalOptions) Cluster() *ClusterOptions {
+func (o *UniversalOptions) Cluster() *OSSClusterOptions {
 	if len(o.Addrs) == 0 {
 		o.Addrs = []string{"127.0.0.1:6379"}
 	}
 
-	return &ClusterOptions{
+	return &OSSClusterOptions{
 		Addrs:      o.Addrs,
 		ClientName: o.ClientName,
 		Dialer:     o.Dialer,

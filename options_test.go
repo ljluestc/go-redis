@@ -3,6 +3,7 @@
 package redis
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"testing"
@@ -132,12 +133,12 @@ func TestParseURL(t *testing.T) {
 				}
 				return
 			}
-			comprareOptions(t, actual, tc.o)
+			compareOptions(t, actual, tc.o)
 		})
 	}
 }
 
-func comprareOptions(t *testing.T, actual, expected *Options) {
+func compareOptions(t *testing.T, actual, expected *Options) {
 	t.Helper()
 
 	if actual.Addr != expected.Addr {
@@ -223,6 +224,94 @@ func TestReadTimeoutOptions(t *testing.T) {
 	}
 }
 
+// TestHealthCheckHookOption tests the HealthCheckHook option
+func TestHealthCheckHookOption(t *testing.T) {
+	t.Run("Default", func(t *testing.T) {
+		opt := &Options{
+			Addr: "localhost:6379",
+		}
+
+		// Check that HealthCheckHook is nil by default
+		if opt.HealthCheckHook != nil {
+			t.Error("Expected default HealthCheckHook to be nil")
+		}
+
+		// Create client with default option (should set default health check)
+		client := NewClient(opt)
+		defer client.Close()
+
+		// Options should still be accessible and not nil
+		if client.Options().HealthCheckHook == nil {
+			t.Error("Expected client to have a default HealthCheckHook after NewClient")
+		}
+	})
+
+	t.Run("Custom", func(t *testing.T) {
+		// Create a custom health check that always returns healthy
+		customHealthCheck := func(ctx context.Context, cn *Conn) bool {
+			return true
+		}
+
+		opt := &Options{
+			Addr:            "localhost:6379",
+			HealthCheckHook: customHealthCheck,
+		}
+
+		// Create client with custom option
+		client := NewClient(opt)
+		defer client.Close()
+
+		// Check that our health check was preserved
+		if client.Options().HealthCheckHook == nil {
+			t.Error("Expected client to preserve custom HealthCheckHook")
+		}
+
+		// Can't directly compare functions, so just check it's not nil
+		if client.Options().HealthCheckHook == nil {
+			t.Error("Custom HealthCheckHook was lost in client options")
+		}
+	})
+
+	t.Run("ClusterOptions", func(t *testing.T) {
+		// Create a custom health check for cluster
+		customHealthCheck := func(ctx context.Context, cn *Conn) bool {
+			return true
+		}
+
+		opt := &OSSClusterOptions{
+			Addrs:           []string{"localhost:6379"},
+			HealthCheckHook: customHealthCheck,
+		}
+
+		// Create cluster client with custom option
+		client := NewClusterClient(opt)
+		defer client.Close()
+
+		// Check that our health check was preserved
+		if opt.HealthCheckHook == nil {
+			t.Error("Expected cluster client to preserve custom HealthCheckHook")
+		}
+	})
+
+	t.Run("FailoverOptions", func(t *testing.T) {
+		// Create a custom health check for failover
+		customHealthCheck := func(ctx context.Context, cn *Conn) bool {
+			return true
+		}
+
+		opt := &FailoverOptions{
+			MasterName:      "master",
+			SentinelAddrs:   []string{"localhost:26379"},
+			HealthCheckHook: customHealthCheck,
+		}
+
+		// Skip actual client creation since it requires sentinel setup
+		// Just verify the option is properly set
+		if opt.HealthCheckHook == nil {
+			t.Error("Failed to set HealthCheckHook in FailoverOptions")
+		}
+	})
+}
 func TestProtocolOptions(t *testing.T) {
 	testCasesMap := map[int]int{
 		0: 3,

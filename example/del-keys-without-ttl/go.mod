@@ -1,11 +1,13 @@
 module github.com/redis/go-redis/example/del-keys-without-ttl
 
-go 1.18
+go 1.24
+
+toolchain go1.24.3
 
 replace github.com/redis/go-redis/v9 => ../..
 
 require (
-	github.com/redis/go-redis/v9 v9.9.0
+	github.com/redis/go-redis/v9 v9.10.0
 	go.uber.org/zap v1.24.0
 )
 

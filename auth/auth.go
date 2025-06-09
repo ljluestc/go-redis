@@ -1,4 +1,4 @@
-// Package auth package provides authentication-related interfaces and types.
+// Package auth provides authentication-related interfaces and types.
 // It also includes a basic implementation of credentials using username and password.
 package auth
 
