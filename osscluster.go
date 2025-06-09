@@ -1583,6 +1583,27 @@ func (c *ClusterClient) processTxPipelineNode(
 func (c *ClusterClient) processTxPipelineNodeConn(
 	ctx context.Context, _ *clusterNode, cn *pool.Conn, cmds []Cmder, failedCmds *cmdsMap,
 ) error {
+	var state *clusterState
+	var err error
+
+	if c.opt.DisableAutoReload {
+		// Skip reloading and use current state when DisableAutoReload is enabled
+		state = c.state.Load()
+		if state == nil {
+			// Initial load if state is not set
+			state, err = c.state.ReloadOrGet(ctx)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// Standard behavior - reload or get
+		state, err = c.state.ReloadOrGet(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := cn.WithWriter(c.context(ctx), c.opt.WriteTimeout, func(wr *proto.Writer) error {
 		return writeCmds(wr, cmds)
 	}); err != nil {

@@ -126,7 +126,126 @@ func appendStructField(dst []interface{}, v reflect.Value) []interface{} {
 			dst = append(dst, name, field.Interface())
 		}
 	}
+package redis
 
+import (
+	"context"
+	"time"
+)
+
+// Sort represents options for the SORT command
+type Sort struct {
+	By       string
+	Offset   int64
+	Count    int64
+	Order    string
+	Alpha    bool
+	Get      []string
+	Store    string
+	IsStore  bool
+}
+
+// ZRangeBy represents options for the ZRANGEBYSCORE command
+type ZRangeBy struct {
+	Min    string
+	Max    string
+	Offset int64
+	Count  int64
+}
+
+// ZStore represents options for ZINTERSTORE and ZUNIONSTORE commands
+type ZStore struct {
+	Keys    []string
+	Weights []int64
+	// Can be SUM, MIN or MAX
+	Aggregate string
+}
+
+// ZRangeByScoreWithScores is a wrapper for ZRangeByScore that includes scores
+func (c *Client) ZRangeByScoreWithScores(ctx context.Context, key string, opt *ZRangeBy) *ZSliceCmd {
+	// Placeholder implementation
+	return &ZSliceCmd{}
+}
+
+// ZInterStore performs an ZINTERSTORE command
+func (c *Client) ZInterStore(ctx context.Context, destination string, store *ZStore) *IntCmd {
+	// Placeholder implementation
+	return &IntCmd{}
+}
+
+// Eval evaluates a Lua script
+func (c *Client) Eval(ctx context.Context, script string, keys []string, args ...interface{}) *Cmd {
+	// Placeholder implementation
+	return &Cmd{}
+}
+
+// Do executes a custom Redis command
+func (c *Client) Do(ctx context.Context, args ...interface{}) *Cmd {
+	// Placeholder implementation
+	return &Cmd{}
+}
+
+// SetNX sets a key-value pair if the key doesn't exist
+func (c *Client) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *BoolCmd {
+	// Placeholder implementation
+	return &BoolCmd{}
+}
+
+// Sort sorts the elements in a list, set or sorted set
+func (c *Client) Sort(ctx context.Context, key string, sort *Sort) *StringSliceCmd {
+	// Placeholder implementation
+	return &StringSliceCmd{}
+}
+
+// Cmd represents a Redis command
+type Cmd struct {
+	// Command implementation
+}
+
+// Result returns the command result
+func (c *Cmd) Result() (interface{}, error) {
+	// Placeholder implementation
+	return nil, nil
+}
+
+// ZSliceCmd represents a command that returns a slice of Z structs
+type ZSliceCmd struct {
+	// Command implementation
+}
+
+// Result returns the command result
+func (c *ZSliceCmd) Result() ([]Z, error) {
+	// Placeholder implementation
+	return []Z{}, nil
+}
+
+// Z represents a sorted set member
+type Z struct {
+	Score  float64
+	Member interface{}
+}
+
+// BoolCmd represents a command that returns a boolean
+type BoolCmd struct {
+	// Command implementation
+}
+
+// Result returns the command result
+func (c *BoolCmd) Result() (bool, error) {
+	// Placeholder implementation
+	return false, nil
+}
+
+// StringSliceCmd represents a command that returns a slice of strings
+type StringSliceCmd struct {
+	// Command implementation
+}
+
+// Result returns the command result
+func (c *StringSliceCmd) Result() ([]string, error) {
+	// Placeholder implementation
+	return []string{}, nil
+}
 	return dst
 }
 
