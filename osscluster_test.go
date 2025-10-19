@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	. "github.com/bsm/ginkgo/v2"
@@ -264,6 +265,12 @@ var _ = Describe("ClusterClient", func() {
 	var client *redis.ClusterClient
 
 	assertClusterClient := func() {
+		It("do", func() {
+			val, err := client.Do(ctx, "ping").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(val).To(Equal("PONG"))
+		})
+
 		It("should GET/SET/DEL", func() {
 			err := client.Get(ctx, "A").Err()
 			Expect(err).To(Equal(redis.Nil))
@@ -456,8 +463,7 @@ var _ = Describe("ClusterClient", func() {
 		Describe("pipelining", func() {
 			var pipe *redis.Pipeline
 
-			assertPipeline := func() {
-				keys := []string{"A", "B", "C", "D", "E", "F", "G"}
+			assertPipeline := func(keys []string) {
 
 				It("follows redirects", func() {
 					if !failover {
@@ -476,13 +482,12 @@ var _ = Describe("ClusterClient", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(cmds).To(HaveLen(14))
 
-					_ = client.ForEachShard(ctx, func(ctx context.Context, node *redis.Client) error {
-						defer GinkgoRecover()
-						Eventually(func() int64 {
-							return node.DBSize(ctx).Val()
-						}, 30*time.Second).ShouldNot(BeZero())
-						return nil
-					})
+					// Check that all keys are set.
+					for _, key := range keys {
+						Eventually(func() string {
+							return client.Get(ctx, key).Val()
+						}, 30*time.Second).Should(Equal(key + "_value"))
+					}
 
 					if !failover {
 						for _, key := range keys {
@@ -511,14 +516,14 @@ var _ = Describe("ClusterClient", func() {
 				})
 
 				It("works with missing keys", func() {
-					pipe.Set(ctx, "A", "A_value", 0)
-					pipe.Set(ctx, "C", "C_value", 0)
+					pipe.Set(ctx, "A{s}", "A_value", 0)
+					pipe.Set(ctx, "C{s}", "C_value", 0)
 					_, err := pipe.Exec(ctx)
 					Expect(err).NotTo(HaveOccurred())
 
-					a := pipe.Get(ctx, "A")
-					b := pipe.Get(ctx, "B")
-					c := pipe.Get(ctx, "C")
+					a := pipe.Get(ctx, "A{s}")
+					b := pipe.Get(ctx, "B{s}")
+					c := pipe.Get(ctx, "C{s}")
 					cmds, err := pipe.Exec(ctx)
 					Expect(err).To(Equal(redis.Nil))
 					Expect(cmds).To(HaveLen(3))
@@ -541,7 +546,8 @@ var _ = Describe("ClusterClient", func() {
 
 				AfterEach(func() {})
 
-				assertPipeline()
+				keys := []string{"A", "B", "C", "D", "E", "F", "G"}
+				assertPipeline(keys)
 
 				It("doesn't fail node with context.Canceled error", func() {
 					ctx, cancel := context.WithCancel(context.Background())
@@ -584,7 +590,34 @@ var _ = Describe("ClusterClient", func() {
 
 				AfterEach(func() {})
 
-				assertPipeline()
+				// TxPipeline doesn't support cross slot commands.
+				// Use hashtag to force all keys to the same slot.
+				keys := []string{"A{s}", "B{s}", "C{s}", "D{s}", "E{s}", "F{s}", "G{s}"}
+				assertPipeline(keys)
+
+				// make sure CrossSlot error is returned
+				It("returns CrossSlot error", func() {
+					pipe.Set(ctx, "A{s}", "A_value", 0)
+					pipe.Set(ctx, "B{t}", "B_value", 0)
+					Expect(hashtag.Slot("A{s}")).NotTo(Equal(hashtag.Slot("B{t}")))
+					_, err := pipe.Exec(ctx)
+					Expect(err).To(MatchError(redis.ErrCrossSlot))
+				})
+
+				It("works normally with keyless commands and no CrossSlot error", func() {
+					pipe.Set(ctx, "A{s}", "A_value", 0)
+					pipe.Ping(ctx)
+					pipe.Set(ctx, "B{s}", "B_value", 0)
+					pipe.Ping(ctx)
+					_, err := pipe.Exec(ctx)
+					Expect(err).To(Not(HaveOccurred()))
+				})
+
+				// doesn't fail when no commands are queued
+				It("returns no error when there are no commands", func() {
+					_, err := pipe.Exec(ctx)
+					Expect(err).NotTo(HaveOccurred())
+				})
 			})
 		})
 
@@ -612,9 +645,171 @@ var _ = Describe("ClusterClient", func() {
 			}, 30*time.Second).ShouldNot(HaveOccurred())
 		})
 
+		It("supports PubSub with ReadOnly option", func() {
+			opt = redisClusterOptions()
+			opt.ReadOnly = true
+			client = cluster.newClusterClient(ctx, opt)
+
+			pubsub := client.Subscribe(ctx, "mychannel")
+			defer pubsub.Close()
+
+			Eventually(func() error {
+				var masterPubsubChannels atomic.Int64
+				var slavePubsubChannels atomic.Int64
+
+				err := client.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
+					info := master.InfoMap(ctx, "stats")
+					if info.Err() != nil {
+						return info.Err()
+					}
+
+					pc, err := strconv.Atoi(info.Item("Stats", "pubsub_channels"))
+					if err != nil {
+						return err
+					}
+
+					masterPubsubChannels.Add(int64(pc))
+
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+
+				err = client.ForEachSlave(ctx, func(ctx context.Context, slave *redis.Client) error {
+					info := slave.InfoMap(ctx, "stats")
+					if info.Err() != nil {
+						return info.Err()
+					}
+
+					pc, err := strconv.Atoi(info.Item("Stats", "pubsub_channels"))
+					if err != nil {
+						return err
+					}
+
+					slavePubsubChannels.Add(int64(pc))
+
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+
+				if c := masterPubsubChannels.Load(); c != int64(0) {
+					return fmt.Errorf("total master pubsub_channels is %d; expected 0", c)
+				}
+
+				if c := slavePubsubChannels.Load(); c != int64(1) {
+					return fmt.Errorf("total slave pubsub_channels is %d; expected 1", c)
+				}
+
+				return nil
+			}, 30*time.Second).ShouldNot(HaveOccurred())
+
+			Eventually(func() error {
+				_, err := client.Publish(ctx, "mychannel", "hello").Result()
+				if err != nil {
+					return err
+				}
+
+				msg, err := pubsub.ReceiveTimeout(ctx, time.Second)
+				if err != nil {
+					return err
+				}
+
+				_, ok := msg.(*redis.Message)
+				if !ok {
+					return fmt.Errorf("got %T, wanted *redis.Message", msg)
+				}
+
+				return nil
+			}, 30*time.Second).ShouldNot(HaveOccurred())
+		})
+
 		It("supports sharded PubSub", func() {
 			pubsub := client.SSubscribe(ctx, "mychannel")
 			defer pubsub.Close()
+
+			Eventually(func() error {
+				_, err := client.SPublish(ctx, "mychannel", "hello").Result()
+				if err != nil {
+					return err
+				}
+
+				msg, err := pubsub.ReceiveTimeout(ctx, time.Second)
+				if err != nil {
+					return err
+				}
+
+				_, ok := msg.(*redis.Message)
+				if !ok {
+					return fmt.Errorf("got %T, wanted *redis.Message", msg)
+				}
+
+				return nil
+			}, 30*time.Second).ShouldNot(HaveOccurred())
+		})
+
+		It("supports sharded PubSub with ReadOnly option", func() {
+			opt = redisClusterOptions()
+			opt.ReadOnly = true
+			client = cluster.newClusterClient(ctx, opt)
+
+			pubsub := client.SSubscribe(ctx, "mychannel")
+			defer pubsub.Close()
+
+			Eventually(func() error {
+				var masterPubsubShardChannels atomic.Int64
+				var slavePubsubShardChannels atomic.Int64
+
+				err := client.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
+					info := master.InfoMap(ctx, "stats")
+					if info.Err() != nil {
+						return info.Err()
+					}
+
+					pc, err := strconv.Atoi(info.Item("Stats", "pubsubshard_channels"))
+					if err != nil {
+						return err
+					}
+
+					masterPubsubShardChannels.Add(int64(pc))
+
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+
+				err = client.ForEachSlave(ctx, func(ctx context.Context, slave *redis.Client) error {
+					info := slave.InfoMap(ctx, "stats")
+					if info.Err() != nil {
+						return info.Err()
+					}
+
+					pc, err := strconv.Atoi(info.Item("Stats", "pubsubshard_channels"))
+					if err != nil {
+						return err
+					}
+
+					slavePubsubShardChannels.Add(int64(pc))
+
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+
+				if c := masterPubsubShardChannels.Load(); c != int64(0) {
+					return fmt.Errorf("total master pubsubshard_channels is %d; expected 0", c)
+				}
+
+				if c := slavePubsubShardChannels.Load(); c != int64(1) {
+					return fmt.Errorf("total slave pubsubshard_channels is %d; expected 1", c)
+				}
+
+				return nil
+			}, 30*time.Second).ShouldNot(HaveOccurred())
 
 			Eventually(func() error {
 				_, err := client.SPublish(ctx, "mychannel", "hello").Result()
@@ -1634,6 +1829,10 @@ var _ = Describe("ClusterClient ParseURL", func() {
 			url:  "redis://localhost:123?conn_max_idle_time=",
 			o:    &redis.ClusterOptions{Addrs: []string{"localhost:123"}, ConnMaxIdleTime: 0},
 		}, {
+			test: "FailingTimeoutSeconds",
+			url:  "redis://localhost:123?failing_timeout_seconds=25",
+			o:    &redis.ClusterOptions{Addrs: []string{"localhost:123"}, FailingTimeoutSeconds: 25},
+		}, {
 			test: "Protocol",
 			url:  "redis://localhost:123?protocol=2",
 			o:    &redis.ClusterOptions{Addrs: []string{"localhost:123"}, Protocol: 2},
@@ -1697,7 +1896,79 @@ var _ = Describe("ClusterClient ParseURL", func() {
 				Expect(tc.o.ConnMaxLifetime).To(Equal(actual.ConnMaxLifetime))
 				Expect(tc.o.ConnMaxIdleTime).To(Equal(actual.ConnMaxIdleTime))
 				Expect(tc.o.PoolTimeout).To(Equal(actual.PoolTimeout))
+				Expect(tc.o.FailingTimeoutSeconds).To(Equal(actual.FailingTimeoutSeconds))
 			}
 		}
+	})
+})
+
+var _ = Describe("ClusterClient FailingTimeoutSeconds", func() {
+	var client *redis.ClusterClient
+
+	AfterEach(func() {
+		if client != nil {
+			_ = client.Close()
+		}
+	})
+
+	It("should use default failing timeout of 15 seconds", func() {
+		opt := redisClusterOptions()
+		client = cluster.newClusterClient(ctx, opt)
+
+		// Default should be 15 seconds
+		Expect(opt.FailingTimeoutSeconds).To(Equal(15))
+	})
+
+	It("should use custom failing timeout", func() {
+		opt := redisClusterOptions()
+		opt.FailingTimeoutSeconds = 30
+		client = cluster.newClusterClient(ctx, opt)
+
+		// Should use custom value
+		Expect(opt.FailingTimeoutSeconds).To(Equal(30))
+	})
+
+	It("should parse failing_timeout_seconds from URL", func() {
+		url := "redis://localhost:16600?failing_timeout_seconds=25"
+		opt, err := redis.ParseClusterURL(url)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(opt.FailingTimeoutSeconds).To(Equal(25))
+	})
+
+	It("should handle node failing timeout correctly", func() {
+		opt := redisClusterOptions()
+		opt.FailingTimeoutSeconds = 2 // Short timeout for testing
+		client = cluster.newClusterClient(ctx, opt)
+
+		// Get a node and mark it as failing
+		nodes, err := client.Nodes(ctx, "A")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(nodes)).To(BeNumerically(">", 0))
+
+		node := nodes[0]
+
+		// Initially not failing
+		Expect(node.Failing()).To(BeFalse())
+
+		// Mark as failing
+		node.MarkAsFailing()
+		Expect(node.Failing()).To(BeTrue())
+
+		// Should still be failing after 1 second (less than timeout)
+		time.Sleep(1 * time.Second)
+		Expect(node.Failing()).To(BeTrue())
+
+		// Should not be failing after timeout expires
+		time.Sleep(2 * time.Second) // Total 3 seconds > 2 second timeout
+		Expect(node.Failing()).To(BeFalse())
+	})
+
+	It("should handle zero timeout by using default", func() {
+		opt := redisClusterOptions()
+		opt.FailingTimeoutSeconds = 0 // Should use default
+		client = cluster.newClusterClient(ctx, opt)
+
+		// After initialization, should be set to default
+		Expect(opt.FailingTimeoutSeconds).To(Equal(15))
 	})
 })

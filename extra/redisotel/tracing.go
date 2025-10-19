@@ -101,14 +101,22 @@ func (th *tracingHook) DialHook(hook redis.DialHook) redis.DialHook {
 
 func (th *tracingHook) ProcessHook(hook redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
-		fn, file, line := funcFileLine("github.com/redis/go-redis")
+
+		// Check if the command should be filtered out
+		if th.conf.filter != nil && th.conf.filter(cmd) {
+			// If so, just call the next hook
+			return hook(ctx, cmd)
+		}
 
 		attrs := make([]attribute.KeyValue, 0, 8)
-		attrs = append(attrs,
-			semconv.CodeFunction(fn),
-			semconv.CodeFilepath(file),
-			semconv.CodeLineNumber(line),
-		)
+		if th.conf.callerEnabled {
+			fn, file, line := funcFileLine("github.com/redis/go-redis")
+			attrs = append(attrs,
+				semconv.CodeFunction(fn),
+				semconv.CodeFilepath(file),
+				semconv.CodeLineNumber(line),
+			)
+		}
 
 		if th.conf.dbStmtEnabled {
 			cmdString := rediscmd.CmdString(cmd)
@@ -133,15 +141,19 @@ func (th *tracingHook) ProcessPipelineHook(
 	hook redis.ProcessPipelineHook,
 ) redis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []redis.Cmder) error {
-		fn, file, line := funcFileLine("github.com/redis/go-redis")
-
 		attrs := make([]attribute.KeyValue, 0, 8)
 		attrs = append(attrs,
-			semconv.CodeFunction(fn),
-			semconv.CodeFilepath(file),
-			semconv.CodeLineNumber(line),
 			attribute.Int("db.redis.num_cmd", len(cmds)),
 		)
+
+		if th.conf.callerEnabled {
+			fn, file, line := funcFileLine("github.com/redis/go-redis")
+			attrs = append(attrs,
+				semconv.CodeFunction(fn),
+				semconv.CodeFilepath(file),
+				semconv.CodeLineNumber(line),
+			)
+		}
 
 		summary, cmdsString := rediscmd.CmdsString(cmds)
 		if th.conf.dbStmtEnabled {

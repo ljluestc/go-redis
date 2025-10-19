@@ -1,6 +1,9 @@
 package redisotel
 
 import (
+	"strings"
+
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -20,6 +23,8 @@ type config struct {
 	tracer trace.Tracer
 
 	dbStmtEnabled bool
+	callerEnabled bool
+	filter        func(cmd redis.Cmder) bool
 
 	// Metrics options.
 
@@ -27,6 +32,8 @@ type config struct {
 	meter metric.Meter
 
 	poolName string
+
+	closeChan chan struct{}
 }
 
 type baseOption interface {
@@ -57,6 +64,7 @@ func newConfig(opts ...baseOption) *config {
 		tp:            otel.GetTracerProvider(),
 		mp:            otel.GetMeterProvider(),
 		dbStmtEnabled: true,
+		callerEnabled: true,
 	}
 
 	for _, opt := range opts {
@@ -106,11 +114,49 @@ func WithTracerProvider(provider trace.TracerProvider) TracingOption {
 	})
 }
 
-// WithDBStatement tells the tracing hook not to log raw redis commands.
+// WithDBStatement tells the tracing hook to log raw redis commands.
 func WithDBStatement(on bool) TracingOption {
 	return tracingOption(func(conf *config) {
 		conf.dbStmtEnabled = on
 	})
+}
+
+// WithCallerEnabled tells the tracing hook to log the calling function, file and line.
+func WithCallerEnabled(on bool) TracingOption {
+	return tracingOption(func(conf *config) {
+		conf.callerEnabled = on
+	})
+}
+
+// WithCommandFilter allows filtering of commands when tracing to omit commands that may have sensitive details like
+// passwords.
+func WithCommandFilter(filter func(cmd redis.Cmder) bool) TracingOption {
+	return tracingOption(func(conf *config) {
+		conf.filter = filter
+	})
+}
+
+func BasicCommandFilter(cmd redis.Cmder) bool {
+	if strings.ToLower(cmd.Name()) == "auth" {
+		return true
+	}
+
+	if strings.ToLower(cmd.Name()) == "hello" {
+		if len(cmd.Args()) < 3 {
+			return false
+		}
+
+		arg, exists := cmd.Args()[2].(string)
+		if !exists {
+			return false
+		}
+
+		if strings.ToLower(arg) == "auth" {
+			return true
+		}
+	}
+
+	return false
 }
 
 //------------------------------------------------------------------------------
@@ -134,5 +180,11 @@ func (fn metricsOption) metrics() {}
 func WithMeterProvider(mp metric.MeterProvider) MetricsOption {
 	return metricsOption(func(conf *config) {
 		conf.mp = mp
+	})
+}
+
+func WithCloseChan(closeChan chan struct{}) MetricsOption {
+	return metricsOption(func(conf *config) {
+		conf.closeChan = closeChan
 	})
 }

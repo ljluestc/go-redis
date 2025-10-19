@@ -12,7 +12,6 @@ import (
 
 	. "github.com/bsm/ginkgo/v2"
 	. "github.com/bsm/gomega"
-
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/auth"
 )
@@ -87,6 +86,12 @@ var _ = Describe("Client", func() {
 
 		err = client.Ping(ctx).Err()
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("do", func() {
+		val, err := client.Do(ctx, "ping").Result()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(val).To(Equal("PONG"))
 	})
 
 	It("should ping", func() {
